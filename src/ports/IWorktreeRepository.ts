@@ -9,4 +9,13 @@ export interface IWorktreeRepository {
   remove(id: string): Promise<void>;
   /** debug port registry, keyed by worktree PATH. */
   getPortRegistry(): Record<string, number>;
+
+  /**
+   * Drops the worktrees whose directory no longer exists, and returns the ones
+   * that survive.
+   *
+   * On the port because the application decides *when* to reconcile the store
+   * with the disk; the store only knows how.
+   */
+  pruneNonExistent(): Promise<Worktree[]>;
 }

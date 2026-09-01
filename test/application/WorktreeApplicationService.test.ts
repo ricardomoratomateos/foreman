@@ -221,6 +221,8 @@ function makeHarness(o: HarnessOpts = {}) {
     setAlias: vi.fn(async (id: string, alias: string) => { calls.push(`store.setAlias:${id}:${alias}`); }),
     remove: vi.fn(),
     getPortRegistry: vi.fn(() => ({})),
+    // Nothing has vanished by default; the tests that care override it.
+    pruneNonExistent: vi.fn(async () => worktrees),
   };
 
   const manager = {
@@ -3153,6 +3155,31 @@ describe('forgetWorktree', () => {
     expect(h.claude.forget).toHaveBeenCalledWith('a');
     expect(h.tabManager.forget).toHaveBeenCalledWith('a');
     expect(h.breakpointManager.forget).toHaveBeenCalledWith('a');
+  });
+});
+
+describe('pruneVanishedWorktrees', () => {
+  it('forgets a worktree whose directory someone removed behind our back', async () => {
+    // `git worktree remove` outside the extension left the card in the sidebar
+    // for good, and its tabs, breakpoints and session names with it.
+    const alive = makeWorktree({ id: 'alive', branch: 'feat/a', path: '/repo/zer/feat-a' });
+    const gone = makeWorktree({ id: 'gone', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const h = makeHarness({ worktrees: [alive, gone], workspaceFolders: ['/repo'] });
+    h.store.pruneNonExistent.mockResolvedValue([alive]);
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.claude.forget).toHaveBeenCalledWith('gone');
+    expect(h.claude.forget).not.toHaveBeenCalledWith('alive');
+  });
+
+  it('forgets nothing when every worktree is still on disk', async () => {
+    const a = makeWorktree({ id: 'a', branch: 'feat/a', path: '/repo/zer/feat-a' });
+    const h = makeHarness({ worktrees: [a], workspaceFolders: ['/repo'] });
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.claude.forget).not.toHaveBeenCalled();
   });
 });
 

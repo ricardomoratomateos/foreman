@@ -788,7 +788,27 @@ export class WorktreeApplicationService implements DiffPanelHost {
     }
   }
 
+  /**
+   * Forgets worktrees whose directory is gone, and the state that described
+   * them.
+   *
+   * `pruneNonExistent` has existed, written and tested, since the store did,
+   * and nothing ever called it. A worktree removed with `git worktree remove`
+   * outside this extension kept its card in the sidebar until someone deleted
+   * it by hand — and kept its tabs, breakpoints and session names for good.
+   *
+   * It reads the disk, so it runs when a repository loads and not on every
+   * refresh.
+   */
+  private async pruneVanishedWorktrees(): Promise<void> {
+    const before = this.deps.manager.list().map((wt) => wt.id);
+    const alive = await this.deps.store.pruneNonExistent();
+    const survives = new Set(alive.map((wt) => wt.id));
+    before.filter((id) => !survives.has(id)).forEach((id) => this.forgetWorktree(id));
+  }
+
   async loadWorktreesForRepo(repoRoot: string): Promise<void> {
+    await this.pruneVanishedWorktrees();
     const { current } = await this.deps.manager.reconcile(repoRoot);
     const normalizedRoot = canonicalPath(repoRoot);
     // The store is global; this window is not. Everything below — the explorer
