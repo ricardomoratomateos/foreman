@@ -35,6 +35,12 @@ export class BreakpointManager {
   }
 
   /** Stashed (hidden) breakpoints for a worktree — exposed for tests. */
+  /** Drops the breakpoints stashed for a worktree that no longer exists. */
+  forget(worktreeId: string): void {
+    if (!this.saved.delete(worktreeId)) return;
+    this.persist();
+  }
+
   getStashed(worktreeId: string): SavedBreakpoint[] {
     return this.saved.get(worktreeId) ?? [];
   }

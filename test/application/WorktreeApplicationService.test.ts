@@ -139,6 +139,7 @@ function makeHarness(o: HarnessOpts = {}) {
     getShellCount: vi.fn(() => 1),
     hasTerminals: vi.fn((id: string) => (o.terminalIds ?? []).includes(id)),
     closeViewer: vi.fn(async (id: string) => { calls.push(`claude.closeViewer:${id}`); }),
+    forget: vi.fn(),
     killWorktreeSession: vi.fn(async (id: string) => { calls.push(`claude.killWorktreeSession:${id}`); }),
     register: vi.fn((id: string) => { calls.push(`claude.register:${id}`); }),
     reconnect: vi.fn(async () => { calls.push('claude.reconnect'); }),
@@ -153,9 +154,10 @@ function makeHarness(o: HarnessOpts = {}) {
       calls.push(`tab.updateViewerState:${wts.map(w => w.id).join(',')}:${[...ids].sort().join(',')}`);
     }),
     closeOtherTabs: vi.fn(async (id: string) => { calls.push(`tab.closeOtherTabs:${id}`); }),
+    forget: vi.fn(),
     restoreTabs: vi.fn((id: string) => { calls.push(`tab.restoreTabs:${id}`); return Promise.resolve(); }),
   };
-  const breakpointManager = { activate: vi.fn() };
+  const breakpointManager = { activate: vi.fn(), forget: vi.fn() };
 
   const folders = [...(o.workspaceFolders ?? ['/repo'])];
   const folderNames = new Map<string, string>(o.workspaceFolderNames ? Object.entries(o.workspaceFolderNames) : []);
@@ -219,6 +221,8 @@ function makeHarness(o: HarnessOpts = {}) {
     setAlias: vi.fn(async (id: string, alias: string) => { calls.push(`store.setAlias:${id}:${alias}`); }),
     remove: vi.fn(),
     getPortRegistry: vi.fn(() => ({})),
+    // Nothing has vanished by default; the tests that care override it.
+    pruneNonExistent: vi.fn(async () => worktrees),
   };
 
   const manager = {
@@ -3134,3 +3138,48 @@ describe('attachDroppedFiles targeting', () => {
     expect(h.claude.pasteToActiveWindow).toHaveBeenCalledWith('b', expect.stringContaining('/tmp/shot.png'));
   });
 });
+
+describe('forgetWorktree', () => {
+  it('drops the managers\' state when a stale entry leaves the store', async () => {
+    // The store owned the worktree; these three own things *about* it. Nothing
+    // removed their keys, so every worktree ever created still had its tabs,
+    // breakpoints and session names recorded for a path that is gone.
+    const stale = makeWorktree({ id: 'a', path: '/repo', branch: 'old-branch' });
+    const h = makeHarness({
+      worktrees: [stale], workspaceFolders: ['/repo'], gitDirs: ['/repo/.git'], existingPaths: ['/repo'],
+    });
+    h.git.currentBranch.mockReturnValue('main');
+
+    await h.service.deleteWorktree(stale);
+
+    expect(h.claude.forget).toHaveBeenCalledWith('a');
+    expect(h.tabManager.forget).toHaveBeenCalledWith('a');
+    expect(h.breakpointManager.forget).toHaveBeenCalledWith('a');
+  });
+});
+
+describe('pruneVanishedWorktrees', () => {
+  it('forgets a worktree whose directory someone removed behind our back', async () => {
+    // `git worktree remove` outside the extension left the card in the sidebar
+    // for good, and its tabs, breakpoints and session names with it.
+    const alive = makeWorktree({ id: 'alive', branch: 'feat/a', path: '/repo/zer/feat-a' });
+    const gone = makeWorktree({ id: 'gone', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const h = makeHarness({ worktrees: [alive, gone], workspaceFolders: ['/repo'] });
+    h.store.pruneNonExistent.mockResolvedValue([alive]);
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.claude.forget).toHaveBeenCalledWith('gone');
+    expect(h.claude.forget).not.toHaveBeenCalledWith('alive');
+  });
+
+  it('forgets nothing when every worktree is still on disk', async () => {
+    const a = makeWorktree({ id: 'a', branch: 'feat/a', path: '/repo/zer/feat-a' });
+    const h = makeHarness({ worktrees: [a], workspaceFolders: ['/repo'] });
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.claude.forget).not.toHaveBeenCalled();
+  });
+});
+

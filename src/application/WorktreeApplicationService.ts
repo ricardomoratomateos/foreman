@@ -712,6 +712,20 @@ export class WorktreeApplicationService implements DiffPanelHost {
     return true;
   }
 
+  /**
+   * Drops the state the managers keep about a worktree that is gone.
+   *
+   * Deliberately after the worktree leaves the store, and deliberately not
+   * inside `manager.delete`: the store owns worktrees, and these three own
+   * things *about* worktrees. Failing to forget must never stop a deletion
+   * that git already carried out, so nothing here throws.
+   */
+  private forgetWorktree(worktreeId: string): void {
+    this.deps.agentManager.forget(worktreeId);
+    this.deps.tabManager.forget(worktreeId);
+    this.deps.breakpointManager.forget(worktreeId);
+  }
+
   /** Open a diff file (path relative to the worktree) in the editor. */
   async openFile(worktreeId: string, relativePath: string, line?: number): Promise<void> {
     const wt = this.findWorktree(worktreeId);
@@ -774,7 +788,27 @@ export class WorktreeApplicationService implements DiffPanelHost {
     }
   }
 
+  /**
+   * Forgets worktrees whose directory is gone, and the state that described
+   * them.
+   *
+   * `pruneNonExistent` has existed, written and tested, since the store did,
+   * and nothing ever called it. A worktree removed with `git worktree remove`
+   * outside this extension kept its card in the sidebar until someone deleted
+   * it by hand — and kept its tabs, breakpoints and session names for good.
+   *
+   * It reads the disk, so it runs when a repository loads and not on every
+   * refresh.
+   */
+  private async pruneVanishedWorktrees(): Promise<void> {
+    const before = this.deps.manager.list().map((wt) => wt.id);
+    const alive = await this.deps.store.pruneNonExistent();
+    const survives = new Set(alive.map((wt) => wt.id));
+    before.filter((id) => !survives.has(id)).forEach((id) => this.forgetWorktree(id));
+  }
+
   async loadWorktreesForRepo(repoRoot: string): Promise<void> {
+    await this.pruneVanishedWorktrees();
     const { current } = await this.deps.manager.reconcile(repoRoot);
     const normalizedRoot = canonicalPath(repoRoot);
     // The store is global; this window is not. Everything below — the explorer
@@ -993,6 +1027,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       // Stale store entry pointing at repoRoot with a mismatched branch — remove
       // from the store only. manager.delete swallows the git error.
       await this.deps.manager.delete(wt.id, false);
+      this.forgetWorktree(wt.id);
       this.ui.pushWebview();
       this.refreshDecorations();
       return;
@@ -1051,6 +1086,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       if (folderIdx !== -1) this.deps.host.removeWorkspaceFolder(folderIdx);
       try {
         await this.deps.manager.delete(wt.id, confirm === 'Delete + branch');
+        this.forgetWorktree(wt.id);
       } catch (e) {
         // The manager refuses to purge the store while git still registers the
         // worktree, so the card stays and the user is told why — better than a
