@@ -1634,3 +1634,33 @@ describe('session aliases', () => {
   });
 });
 
+describe('forget', () => {
+  it('drops the window states, the order and the aliases of a deleted worktree', async () => {
+    const memento = new FakeMemento() as unknown as vscode.Memento;
+    const { mgr, stub } = create('claude', memento);
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'claude', command: 'node' },
+    ]);
+    await mgr.launch(wt);
+    mgr.setSessionAlias('wt-1', 1, 'redis');
+    expect(memento.get('foreman.claudeStates', {})).toHaveProperty('wt-1');
+
+    mgr.forget('wt-1');
+
+    expect(memento.get('foreman.claudeStates', {})).not.toHaveProperty('wt-1');
+    expect(memento.get('foreman.sessionAliases', {})).not.toHaveProperty('wt-1');
+    expect(mgr.getSessions('wt-1')).toEqual([]);
+  });
+
+  it('leaves the other worktrees alone', async () => {
+    const memento = new FakeMemento() as unknown as vscode.Memento;
+    const { mgr } = create('claude', memento);
+    await mgr.launch(wt);
+    await mgr.launch(wt2);
+
+    mgr.forget('wt-1');
+
+    expect(memento.get('foreman.claudeStates', {})).toHaveProperty('wt-2');
+  });
+});
+

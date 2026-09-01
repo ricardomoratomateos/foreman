@@ -125,6 +125,27 @@ export class AgentSessionManager {
   }
 
   /**
+   * Drops every trace of a worktree: its window states, its display order and
+   * the names the user gave its sessions.
+   *
+   * The three stores are keyed by worktree id and none of them ever removed a
+   * key, so a worktree deleted a year ago still has its sessions recorded here.
+   * Nothing reads them, which is why nobody noticed; they simply grow.
+   */
+  forget(worktreeId: string): void {
+    this.windows.delete(worktreeId);
+    this.orders.delete(worktreeId);
+    this.aliases.delete(worktreeId);
+
+    const stored = this.globalState.get<Record<string, unknown>>(AgentSessionManager.STATE_KEY, {});
+    delete stored[worktreeId];
+    this.globalState.update(AgentSessionManager.STATE_KEY, stored);
+
+    this.persistAliases();
+    this.persistOrder();
+  }
+
+  /**
    * Read the persisted state for one window of a worktree. Pre-per-window
    * versions stored a single aggregate string — apply it to every window.
    */
@@ -641,6 +662,15 @@ export class AgentSessionManager {
       if (map.size > 0) out[id] = Object.fromEntries(map.entries());
     }
     this.globalState.update(AgentSessionManager.ALIAS_KEY, out);
+  }
+
+  /** Writes the display orders as they stand, dropping worktrees with none. */
+  private persistOrder(): void {
+    const out: Record<string, number[]> = {};
+    for (const [id, order] of this.orders.entries()) {
+      if (order.length > 0) out[id] = order;
+    }
+    this.globalState.update(AgentSessionManager.ORDER_KEY, out);
   }
 
   /** Persist a user-chosen display order (list of window indexes) for a worktree. */
