@@ -87,6 +87,19 @@ export class TabManager {
     this.globalState.update(STORE_KEY, obj);
   }
 
+  /**
+   * Drops everything remembered about a worktree that no longer exists.
+   *
+   * Called when a worktree is deleted. Without it the entry outlives the
+   * directory it describes: the store is keyed by worktree id and nothing ever
+   * removed a key, so every worktree ever created still has its open tabs
+   * recorded, for a path that is gone.
+   */
+  forget(worktreeId: string): void {
+    if (!this.saved.delete(worktreeId)) return;
+    this.persist();
+  }
+
   getState(worktreeId: string): TabState | undefined {
     return this.saved.get(worktreeId);
   }

@@ -502,3 +502,32 @@ describe('constructor', () => {
     expect(window.onDidChangeActiveTextEditor).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('forget', () => {
+  const worktree = { id: 'a', path: '/repo/a' } as WorktreeRef;
+
+  it('drops a deleted worktree, so its tabs stop outliving its directory', async () => {
+    const memento = new FakeMemento();
+    const { manager, tabsChanged } = build(memento, () => [worktree]);
+    setOpenTabs('/repo/a/one.ts');
+    tabsChanged();
+    expect(savedState(memento)["a"]).toBeDefined();
+
+    manager.forget('a');
+
+    expect(manager.getState('a')).toBeUndefined();
+    expect(savedState(memento)['a']).toBeUndefined();
+  });
+
+  it('leaves the other worktrees alone', () => {
+    const other = { id: 'b', path: '/repo/b' } as WorktreeRef;
+    const memento = new FakeMemento();
+    const { manager, tabsChanged } = build(memento, () => [worktree, other]);
+    setOpenTabs('/repo/a/one.ts', '/repo/b/two.ts');
+    tabsChanged();
+
+    manager.forget('a');
+
+    expect(manager.getState('b')).toBeDefined();
+  });
+});
